@@ -119,7 +119,7 @@ temd = objective1_data_Italy %>% dplyr::select(person_id,birth_date,birth_date,y
 denominator_2020 = objective1_data_Italy
 ```
 
-##### 1. Remove those with CRS diagnosis before 2020 - 68,797
+##### 1. Remove those with CRS diagnosis before 2020 
 
 ```{r}
 
@@ -141,7 +141,7 @@ denominator_2020 = subset(denominator_2020,denominator_2020$crs_in_2019==0)
 
 ```
 
-##### 2. Remove those with nasal polyps before end of 2020 - 26417
+##### 2. Remove those with nasal polyps before end of 2020 
 
 ```{r}
 denominator_2020 = denominator_2020 %>% dplyr::mutate(
@@ -159,7 +159,7 @@ table(denominator_2020$nasal_polyps_before_end_of_2020)
 denominator_2020 = subset(denominator_2020,denominator_2020$nasal_polyps_before_end_of_2020==0)
 ```
 
-##### 3. Remove those with no GP visit in 2019 - 2425277
+##### 3. Remove those with no GP visit in 2019 
 
 ```{r}
 table(denominator_2020$date_gp_appoint_2019) 
@@ -184,7 +184,7 @@ denominator_2020 = subset(denominator_2020,denominator_2020$no_gp_visit_2019==0)
 
 ```
 
-##### 4. Remove those with no GP visit in 2020 - 780793
+##### 4. Remove those with no GP visit in 2020 
 
 ```{r}
 table(denominator_2020$date_gp_appoint_2020) #Check with Sam if this includes before 2020
@@ -209,7 +209,7 @@ denominator_2020 = subset(denominator_2020,denominator_2020$no_gp_visit_2020==0)
 
 ```
 
-##### 5. Remove those who died before or on start of 2020 if any (50848)
+##### 5. Remove those who died before or on start of 2020 if any 
 
 ```{r}
 denominator_2020$death_b4_2020 = ifelse(!is.na(denominator_2020$death_date) & denominator_2020$death_date < denominator_2020$study_start_date_2020_cohort,1,0)
@@ -225,7 +225,7 @@ denominator_2020 = subset(denominator_2020,denominator_2020$death_b4_2020==0)
 
 
 
-##### 5. Remove those with last contact date with physician before 2020 - Zero
+##### 5. Remove those with last contact date with physician before 2020 
 
 ```{r}
 
@@ -925,7 +925,7 @@ write.csv(adults_2020_metrics,"adults_2020_metrics.csv")
 #### Denominator 2021
 
 
-##### 1. Remove those with CRS diagnosis before 2021 - 68,797
+##### 1. Remove those with CRS diagnosis before 2021 
 
 ```{r}
 
@@ -951,7 +951,7 @@ denominator_2021 = subset(denominator_2021,denominator_2021$crs_in_2020==0)
 
 ```
 
-##### 2. Remove those with nasal polyps before end of 2021 - 26417
+##### 2. Remove those with nasal polyps before end of 2021 
 
 ```{r}
 denominator_2021 = denominator_2021 %>% dplyr::mutate(
@@ -969,7 +969,7 @@ table(denominator_2021$nasal_polyps_before_end_of_2021)
 denominator_2021 = subset(denominator_2021,denominator_2021$nasal_polyps_before_end_of_2021==0)
 ```
 
-##### 3. Remove those with no GP visit in 2020 - 2425277
+##### 3. Remove those with no GP visit in 2020 
 
 ```{r}
 table(denominator_2021$date_gp_appoint_2020) 
@@ -994,7 +994,7 @@ denominator_2021 = subset(denominator_2021,denominator_2021$no_gp_visit_2020==0)
 
 ```
 
-##### 4. Remove those with no GP visit in 2021 - 780793
+##### 4. Remove those with no GP visit in 2021 
 
 ```{r}
 table(denominator_2021$date_gp_appoint_2021) #Check with Sam if this includes before 2021
@@ -1019,7 +1019,7 @@ denominator_2021 = subset(denominator_2021,denominator_2021$no_gp_visit_2021==0)
 
 ```
 
-##### 5. Remove those who died before or on start of 2021 if any (50848)
+##### 5. Remove those who died before or on start of 2021 if any 
 
 ```{r}
 denominator_2021$death_b4_2021 = ifelse(!is.na(denominator_2021$death_date) & denominator_2021$death_date < denominator_2021$study_start_date_2021_cohort,1,0)
@@ -1035,7 +1035,7 @@ denominator_2021 = subset(denominator_2021,denominator_2021$death_b4_2021==0)
 
 
 
-##### 5. Remove those with last contact date with physician before 2021 - Zero
+##### 5. Remove those with last contact date with physician before 2021 
 
 ```{r}
 
@@ -1723,7 +1723,7 @@ write.csv(adults_2021_metrics,"adults_2021_metrics.csv")
 
 #### Denominator 2022
 
-##### 1. Remove those with CRS diagnosis before 2022 - 68,797
+##### 1. Remove those with CRS diagnosis before 2022 
 
 ```{r}
 
@@ -1752,7 +1752,7 @@ denominator_2022 = subset(denominator_2022,denominator_2022$crs_in_2021==0)
 
 ```
 
-##### 2. Remove those with nasal polyps before end of 2022 - 26417
+##### 2. Remove those with nasal polyps before end of 2022 
 
 ```{r}
 denominator_2022 = denominator_2022 %>% dplyr::mutate(
@@ -1770,7 +1770,7 @@ table(denominator_2022$nasal_polyps_before_end_of_2022)
 denominator_2022 = subset(denominator_2022,denominator_2022$nasal_polyps_before_end_of_2022==0)
 ```
 
-##### 3. Remove those with no GP visit in 2022 - 2425277
+##### 3. Remove those with no GP visit in 2022 
 
 ```{r}
 table(denominator_2022$date_gp_appoint_2022) 
@@ -1795,7 +1795,7 @@ denominator_2022 = subset(denominator_2022,denominator_2022$no_gp_visit_2022==0)
 
 ```
 
-##### 4. Remove those with no GP visit in 2022 - 780793
+##### 4. Remove those with no GP visit in 2022 
 
 ```{r}
 table(denominator_2022$date_gp_appoint_2022) #Check with Sam if this includes before 2022
@@ -1820,7 +1820,7 @@ denominator_2022 = subset(denominator_2022,denominator_2022$no_gp_visit_2022==0)
 
 ```
 
-##### 5. Remove those who died before or on start of 2022 if any (50848)
+##### 5. Remove those who died before or on start of 2022 if any 
 
 ```{r}
 denominator_2022$death_b4_2022 = ifelse(!is.na(denominator_2022$death_date) & denominator_2022$death_date < denominator_2022$study_start_date_2022_cohort,1,0)
@@ -1836,7 +1836,7 @@ denominator_2022 = subset(denominator_2022,denominator_2022$death_b4_2022==0)
 
 
 
-##### 5. Remove those with last contact date with physician before 2022 - Zero
+##### 5. Remove those with last contact date with physician before 2022 
 
 ```{r}
 
