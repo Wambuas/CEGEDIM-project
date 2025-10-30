@@ -1,0 +1,3194 @@
+---
+title: "R Notebook"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+---
+
+
+```{r}
+
+rm(list = ls())
+
+library(tidyverse)
+library(binom)
+
+```
+
+
+# Import data
+
+```{r}
+objective1_data_UK = read.csv("obj1_uk.csv")
+
+dput(names(objective1_data_UK))
+
+data_fields = data.frame(Column = c("person_id", "death_date", "year_of_birth", "gender_code", 
+"NASAL_POLYPS", "CRS", "CRS_allDiag_2021", "CRS_allDiag_2022", 
+"CRS_allDiag_2023", "CRS_allDiag_2024", "date_gp_appoint_2021", 
+"date_gp_appoint_2022", "date_gp_appoint_2023", "date_gp_appoint_2024", 
+"N_CRS_allDiag"),
+
+Description = c("Person identifier","Date of death","Year of Birth","Gender","Nasal polyps earliest diagnosis date","CRS earliest diagnosis date","Number of CRS diagnosis in year 2021 only","Number of CRS diagnosis in year 2022 only","Number of CRS diagnosis in year 2023 only","Number of CRS diagnosis in year 2024 only",
+                "Number of GP visits in 2021","Number of GP visits in 2022","Number of GP visits in 2023","Number of GP visits in 2024","Count of all diagnoses of CRS on patient record (no upper bound of date)")
+
+)
+
+
+data_fields
+
+```
+
+
+## A glimpse of data
+
+```{r}
+glimpse(objective1_data_UK)
+```
+
+```{r}
+n_distinct(objective1_data_UK$person_id)
+```
+
+
+```{r}
+objective1_data_UK[objective1_data_UK==""] <- NA #set blanks to NA
+```
+
+
+```{r}
+colMeans(is.na(objective1_data_UK))
+```
+
+### Variables needed for follow-up calculation
+
+```{r}
+objective1_data_UK = objective1_data_UK %>% dplyr::mutate(
+  
+  ### 2022 cohort
+  study_start_date_2022_cohort = as.Date("2022-01-01",format = "%Y-%m-%d"),
+  study_end_date_2022_cohort = as.Date("2022-12-31",format = "%Y-%m-%d"),
+  
+  ### 2023 cohort
+  study_start_date_2023_cohort = as.Date("2023-01-01",format = "%Y-%m-%d"),
+  study_end_date_2023_cohort = as.Date("2023-12-31",format = "%Y-%m-%d"),
+  
+  ### 2024 cohort
+  study_start_date_2024_cohort = as.Date("2024-01-01",format = "%Y-%m-%d"),
+  study_end_date_2024_cohort = as.Date("2024-12-31",format = "%Y-%m-%d"),
+  
+  ### Exit date
+  death_date = as.Date(death_date,format = "%Y-%m-%d"),
+  last_observation_date = as.Date(gp_appoint_date_LAST,format = "%Y-%m-%d"),
+  
+  #### CRS diagnosis
+  CRS_date = as.Date(CRS,format = "%Y-%m-%d"),
+  
+  #### NASAL POLYPS
+  nasal_polyps_date = as.Date(NASAL_POLYPS,format = "%Y-%m-%d"),
+  
+  year_of_birth = year(as.Date(birth_date,format = "%Y-%m-%d"))
+
+  
+  )
+
+```
+
+
+```{r}
+temd = objective1_data_UK %>% dplyr::select(person_id,birth_date,year_of_birth)
+```
+
+
+```{r}
+range(objective1_data_UK$death_date,na.rm = T)
+
+table(objective1_data_UK$death_date)
+
+```
+
+### 2022 Cohort
+
+#### Denominator 2022
+
+```{r}
+denominator_2022 = objective1_data_UK
+```
+
+##### 1. Remove those with CRS diagnosis before 2022 - 68,797
+
+```{r}
+
+denominator_2022 = objective1_data_UK %>% dplyr::mutate(
+  #crs_before_2022 = ifelse(!is.na(CRS_date) &  CRS_date < study_start_date_2022_cohort,1,0),
+  crs_before_2021 = ifelse(!is.na(N_CRS_allDiag_before_2021),1,0),
+  crs_in_2021 = ifelse(!is.na(CRS_allDiag_2021),1,0)
+  
+)
+
+
+table(denominator_2022$crs_before_2021)
+table(denominator_2022$crs_in_2021)
+
+```
+
+```{r}
+denominator_2022 = subset(denominator_2022,denominator_2022$crs_before_2021==0)
+denominator_2022 = subset(denominator_2022,denominator_2022$crs_in_2021==0)
+
+```
+
+##### 2. Remove those with nasal polyps before end of 2022 - 26417
+
+```{r}
+denominator_2022 = denominator_2022 %>% dplyr::mutate(
+  nasal_polyps_before_end_of_2022 = ifelse(!is.na(nasal_polyps_date) &  nasal_polyps_date < study_end_date_2022_cohort,1,0)
+)
+
+checks_1 = denominator_2022 %>% dplyr::select(person_id,study_end_date_2022_cohort,nasal_polyps_date,nasal_polyps_before_end_of_2022)
+
+table(denominator_2022$nasal_polyps_before_end_of_2022)
+
+```
+
+
+```{r}
+denominator_2022 = subset(denominator_2022,denominator_2022$nasal_polyps_before_end_of_2022==0)
+```
+
+##### 3. Remove those with no GP visit in 2021 - 2425277
+
+```{r}
+table(denominator_2022$date_gp_appoint_2021) 
+```
+
+
+```{r}
+
+denominator_2022 = denominator_2022 %>% dplyr::mutate(
+  
+  no_gp_visit_2021 = ifelse(is.na(date_gp_appoint_2021),1,0)
+)
+
+table(denominator_2022$no_gp_visit_2021)
+
+```
+
+
+```{r}
+
+denominator_2022 = subset(denominator_2022,denominator_2022$no_gp_visit_2021==0)
+
+```
+
+##### 4. Remove those with no GP visit in 2022 - 780793
+
+```{r}
+table(denominator_2022$date_gp_appoint_2022) #Check with Sam if this includes before 2022
+```
+
+
+```{r}
+
+denominator_2022 = denominator_2022 %>% dplyr::mutate(
+  
+  no_gp_visit_2022 = ifelse(is.na(date_gp_appoint_2022),1,0)
+)
+
+table(denominator_2022$no_gp_visit_2022)
+
+```
+
+
+```{r}
+
+denominator_2022 = subset(denominator_2022,denominator_2022$no_gp_visit_2022==0)
+
+```
+
+##### 5. Remove those who died before or on start of 2022 if any (50848)
+
+```{r}
+denominator_2022$death_b4_2022 = ifelse(!is.na(denominator_2022$death_date) & denominator_2022$death_date < denominator_2022$study_start_date_2022_cohort,1,0)
+
+table(denominator_2022$death_b4_2022)
+
+```
+
+
+```{r}
+denominator_2022 = subset(denominator_2022,denominator_2022$death_b4_2022==0)
+```
+
+
+
+##### 5. Remove those with last contact date with physician before 2022 - Zero
+
+```{r}
+
+last_date_b4_2022 = subset(denominator_2022,!is.na(denominator_2022$last_observation_date) &  denominator_2022$last_observation_date < denominator_2022$study_start_date_2022_cohort)
+
+nrow(last_date_b4_2022)
+
+```
+
+
+
+#### Numerator 2022
+
+
+##### Those with first CRS diagnosis in 2022
+
+```{r}
+denominator_2022$crs_outcome_2022 = ifelse(!is.na(denominator_2022$CRS_date) & denominator_2022$CRS_date <= denominator_2022$study_end_date_2022_cohort,1,0)
+
+table(denominator_2022$crs_outcome_2022)
+
+```
+
+
+
+```{r}
+new_cases_2022=data.frame(table(denominator_2022$crs_outcome_2022))[2,2]
+new_cases_2022
+```
+
+```{r}
+k=subset(denominator_2022,denominator_2022$crs_outcome_2022==1)
+
+range(k$CRS_date)
+```
+
+#### Calculate age
+
+```{r}
+denominator_2022 = denominator_2022 %>% dplyr::mutate(
+  
+  age_2022 = 2022-year_of_birth
+  
+)
+
+summary(denominator_2022$age_2022)
+
+born_after_2022 = subset(denominator_2022,denominator_2022$age_2022<0) #240
+nrow(born_after_2022)
+
+```
+
+#### Exclude those born after 2022
+
+```{r}
+denominator_2022 = subset(denominator_2022,denominator_2022$age_2022>=0)
+
+summary(denominator_2022$age_2022)
+```
+
+
+#### Incidence rates
+
+##### Paediatric population
+
+```{r}
+denominator_2022_paediatrics = subset(denominator_2022,denominator_2022$age_2022<18)
+
+summary(denominator_2022_paediatrics$age_2022)
+
+nrow(denominator_2022_paediatrics)
+
+```
+
+###### Incidence rate overall
+
+```{r}
+new_cases_2022_paediatrics=data.frame(table(denominator_2022_paediatrics$crs_outcome_2022))[2,2]
+new_cases_2022_paediatrics
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_paediatrics / nrow(denominator_2022_paediatrics)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_paediatrics, n = nrow(denominator_2022_paediatrics), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+overall_2022_paediatric = data.frame(n=nrow(denominator_2022_paediatrics),
+                                     Events = new_cases_2022_paediatrics,
+                                     Year = "2022",
+                                     Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),
+                          Group = c("Overall"),
+                          Population = c("Paediatric"))
+
+overall_2022_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(overall_2022_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     overall_2022_paediatric$Incidence, overall_2022_paediatric$LL, overall_2022_paediatric$UL))
+
+overall_2022_paediatric
+
+```
+###### Incidence rate by gender
+
+```{r}
+table(denominator_2022_paediatrics$gender_code)
+```
+
+
+
+
+####### Male
+
+```{r}
+
+
+male = subset(denominator_2022_paediatrics,denominator_2022_paediatrics$gender_code=="M")
+
+new_cases_2022_paediatrics_male=data.frame(table(male$crs_outcome_2022))[2,2]
+new_cases_2022_paediatrics_male
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_paediatrics_male / nrow(male)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_paediatrics_male, n = nrow(male), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+male_2022_paediatric = data.frame(n=nrow(male),
+                                     Events = new_cases_2022_paediatrics_male,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Male"),
+                          Population = c("Paediatric"))
+
+male_2022_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(male_2022_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     male_2022_paediatric$Incidence, male_2022_paediatric$LL, male_2022_paediatric$UL))
+
+male_2022_paediatric
+
+
+
+```
+
+####### Female
+
+
+```{r}
+female = subset(denominator_2022_paediatrics,denominator_2022_paediatrics$gender_code=="F")
+
+new_cases_2022_paediatrics_female=data.frame(table(female$crs_outcome_2022))[2,2]
+new_cases_2022_paediatrics_female
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_paediatrics_female / nrow(female)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_paediatrics_female, n = nrow(female), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+female_2022_paediatric = data.frame(n=nrow(female),
+                                     Events = new_cases_2022_paediatrics_female,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Female"),
+                          Population = c("Paediatric"))
+
+female_2022_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(female_2022_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     female_2022_paediatric$Incidence, female_2022_paediatric$LL, female_2022_paediatric$UL))
+
+female_2022_paediatric
+
+
+
+
+
+
+
+```
+
+
+###### Incidence rate by AGE groups
+
+```{r}
+denominator_2022_paediatrics = denominator_2022_paediatrics %>% dplyr::mutate(
+  
+  age_cats = cut(age_2022, breaks=c(-Inf, 5, 11, 17), labels=c("0 to 5","6 to 11","12 to 17")))
+  
+summary1 = denominator_2022_paediatrics %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age_2022),
+    max   = max(age_2022),
+    n        = n()
+  )
+
+summary1
+
+
+```
+
+
+###### 0 to 5
+
+
+```{r}
+
+age_0_to_5 = subset(denominator_2022_paediatrics,denominator_2022_paediatrics$age_cats=="0 to 5")
+
+new_cases_2022_paediatrics_age_0_to_5=data.frame(table(age_0_to_5$crs_outcome_2022))[2,2]
+new_cases_2022_paediatrics_age_0_to_5
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_paediatrics_age_0_to_5 / nrow(age_0_to_5)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_paediatrics_age_0_to_5, n = nrow(age_0_to_5), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_0_to_5_2022_paediatric = data.frame(n=nrow(age_0_to_5),
+                                     Events = new_cases_2022_paediatrics_age_0_to_5,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("0 to 5"),
+                          Population = c("Paediatric"))
+
+age_0_to_5_2022_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_0_to_5_2022_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_0_to_5_2022_paediatric$Incidence, age_0_to_5_2022_paediatric$LL, age_0_to_5_2022_paediatric$UL))
+
+age_0_to_5_2022_paediatric
+
+
+
+
+
+
+```
+
+
+
+###### 6 to 11
+
+
+```{r}
+
+age_6_to_11 = subset(denominator_2022_paediatrics,denominator_2022_paediatrics$age_cats=="6 to 11")
+
+new_cases_2022_paediatrics_age_6_to_11=data.frame(table(age_6_to_11$crs_outcome_2022))[2,2]
+new_cases_2022_paediatrics_age_6_to_11
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_paediatrics_age_6_to_11 / nrow(age_6_to_11)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_paediatrics_age_6_to_11, n = nrow(age_6_to_11), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_6_to_11_2022_paediatric = data.frame(n=nrow(age_6_to_11),
+                                     Events = new_cases_2022_paediatrics_age_6_to_11,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("6 to 11"),
+                          Population = c("Paediatric"))
+
+age_6_to_11_2022_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_6_to_11_2022_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_6_to_11_2022_paediatric$Incidence, age_6_to_11_2022_paediatric$LL, age_6_to_11_2022_paediatric$UL))
+
+age_6_to_11_2022_paediatric
+
+```
+
+###### 12 to 17
+
+
+```{r}
+
+age_12_to_17 = subset(denominator_2022_paediatrics,denominator_2022_paediatrics$age_cats=="12 to 17")
+
+new_cases_2022_paediatrics_age_12_to_17=data.frame(table(age_12_to_17$crs_outcome_2022))[2,2]
+new_cases_2022_paediatrics_age_12_to_17
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_paediatrics_age_12_to_17 / nrow(age_12_to_17)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_paediatrics_age_12_to_17, n = nrow(age_12_to_17), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_12_to_17_2022_paediatric = data.frame(n=nrow(age_12_to_17),
+                                     Events = new_cases_2022_paediatrics_age_12_to_17,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("12 to 17"),
+                          Population = c("Paediatric"))
+
+age_12_to_17_2022_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_12_to_17_2022_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_12_to_17_2022_paediatric$Incidence, age_12_to_17_2022_paediatric$LL, age_12_to_17_2022_paediatric$UL))
+
+age_12_to_17_2022_paediatric
+
+
+```
+
+###### Combine 2022 incidence
+
+```{r}
+
+paediatric_2022_metrics = rbind(overall_2022_paediatric,male_2022_paediatric,female_2022_paediatric,age_0_to_5_2022_paediatric,age_6_to_11_2022_paediatric,age_12_to_17_2022_paediatric)
+
+write.csv(paediatric_2022_metrics,"paediatric_2022_metrics.csv")
+
+```
+
+
+
+#### Adults population
+
+```{r}
+denominator_2022_adults = subset(denominator_2022,denominator_2022$age_2022>=18)
+
+summary(denominator_2022_adults$age_2022)
+
+nrow(denominator_2022_adults)
+
+```
+
+###### Incidence rate overall
+
+```{r}
+new_cases_2022_adults=data.frame(table(denominator_2022_adults$crs_outcome_2022))[2,2]
+new_cases_2022_adults
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults / nrow(denominator_2022_adults)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults, n = nrow(denominator_2022_adults), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+overall_2022_adults = data.frame(n=nrow(denominator_2022_adults),
+                                     Events = new_cases_2022_adults,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Overall"),
+                          Population = c("Adults"))
+
+overall_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(overall_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     overall_2022_adults$Incidence, overall_2022_adults$LL, overall_2022_adults$UL))
+
+overall_2022_adults
+
+```
+###### Incidence rate by gender
+
+```{r}
+table(denominator_2022_adults$gender_code)
+```
+
+
+
+
+####### Male
+
+```{r}
+
+
+male = subset(denominator_2022_adults,denominator_2022_adults$gender_code=="M")
+
+new_cases_2022_adults_male=data.frame(table(male$crs_outcome_2022))[2,2]
+new_cases_2022_adults_male
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_male / nrow(male)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_male, n = nrow(male), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+male_2022_adults = data.frame(n=nrow(male),
+                                     Events = new_cases_2022_adults_male,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Male"),
+                          Population = c("Adults"))
+
+male_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(male_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     male_2022_adults$Incidence, male_2022_adults$LL, male_2022_adults$UL))
+
+male_2022_adults
+
+```
+
+####### Female
+
+
+```{r}
+female = subset(denominator_2022_adults,denominator_2022_adults$gender_code=="F")
+
+new_cases_2022_adults_female=data.frame(table(female$crs_outcome_2022))[2,2]
+new_cases_2022_adults_female
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_female / nrow(female)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_female, n = nrow(female), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+female_2022_adults = data.frame(n=nrow(female),
+                                     Events = new_cases_2022_adults_female,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Female"),
+                          Population = c("Adults"))
+
+female_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(female_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     female_2022_adults$Incidence, female_2022_adults$LL, female_2022_adults$UL))
+
+female_2022_adults
+
+```
+
+
+###### Incidence rate by AGE groups
+
+```{r}
+denominator_2022_adults = denominator_2022_adults %>% dplyr::mutate(
+  
+  age_cats = cut(age_2022, breaks=c(-Inf, 34, 44, 54, 64,102), labels=c("18 to 34","35 to 44","45 to 54","55 to 64",">65")))
+  
+summary1 = denominator_2022_adults %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age_2022),
+    max   = max(age_2022),
+    n        = n()
+  )
+
+summary1
+
+
+```
+
+
+###### 18 to 34
+
+
+```{r}
+
+age_18_to_34 = subset(denominator_2022_adults,denominator_2022_adults$age_cats=="18 to 34")
+
+new_cases_2022_adults_age_18_to_34=data.frame(table(age_18_to_34$crs_outcome_2022))[2,2]
+new_cases_2022_adults_age_18_to_34
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_age_18_to_34 / nrow(age_18_to_34)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_age_18_to_34, n = nrow(age_18_to_34), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_18_to_34_2022_adults = data.frame(n=nrow(age_18_to_34),
+                                     Events = new_cases_2022_adults_age_18_to_34,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("18 to 34"),
+                          Population = c("Adults"))
+
+age_18_to_34_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_18_to_34_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_18_to_34_2022_adults$Incidence, age_18_to_34_2022_adults$LL, age_18_to_34_2022_adults$UL))
+
+age_18_to_34_2022_adults
+
+```
+
+###### 35 to 44
+
+```{r}
+
+age_35_to_44 = subset(denominator_2022_adults,denominator_2022_adults$age_cats=="35 to 44")
+
+new_cases_2022_adults_age_35_to_44=data.frame(table(age_35_to_44$crs_outcome_2022))[2,2]
+new_cases_2022_adults_age_35_to_44
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_age_35_to_44 / nrow(age_35_to_44)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_age_35_to_44, n = nrow(age_35_to_44), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_35_to_44_2022_adults = data.frame(n=nrow(age_35_to_44),
+                                     Events = new_cases_2022_adults_age_35_to_44,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("35 to 44"),
+                          Population = c("Adults"))
+
+age_35_to_44_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_35_to_44_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_35_to_44_2022_adults$Incidence, age_35_to_44_2022_adults$LL, age_35_to_44_2022_adults$UL))
+
+age_35_to_44_2022_adults
+
+```
+
+###### 45 to 54
+
+
+```{r}
+
+age_45_to_54 = subset(denominator_2022_adults,denominator_2022_adults$age_cats=="45 to 54")
+
+new_cases_2022_adults_age_45_to_54=data.frame(table(age_45_to_54$crs_outcome_2022))[2,2]
+new_cases_2022_adults_age_45_to_54
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_age_45_to_54 / nrow(age_45_to_54)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_age_45_to_54, n = nrow(age_45_to_54), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_45_to_54_2022_adults = data.frame(n=nrow(age_45_to_54),
+                                     Events = new_cases_2022_adults_age_45_to_54,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("45 to 54"),
+                          Population = c("Adults"))
+
+age_45_to_54_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_45_to_54_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_45_to_54_2022_adults$Incidence, age_45_to_54_2022_adults$LL, age_45_to_54_2022_adults$UL))
+
+age_45_to_54_2022_adults
+
+```
+
+###### 55 to 64
+
+
+```{r}
+
+age_55_to_64 = subset(denominator_2022_adults,denominator_2022_adults$age_cats=="55 to 64")
+
+new_cases_2022_adults_age_55_to_64=data.frame(table(age_55_to_64$crs_outcome_2022))[2,2]
+new_cases_2022_adults_age_55_to_64
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_age_55_to_64 / nrow(age_55_to_64)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_age_55_to_64, n = nrow(age_55_to_64), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_55_to_64_2022_adults = data.frame(n=nrow(age_55_to_64),
+                                     Events = new_cases_2022_adults_age_55_to_64,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("55 to 64"),
+                          Population = c("Adults"))
+
+age_55_to_64_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_55_to_64_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_55_to_64_2022_adults$Incidence, age_55_to_64_2022_adults$LL, age_55_to_64_2022_adults$UL))
+
+age_55_to_64_2022_adults
+
+```
+
+###### Over 65
+
+
+```{r}
+
+over_65 = subset(denominator_2022_adults,denominator_2022_adults$age_cats==">65")
+
+new_cases_2022_adults_over_65=data.frame(table(over_65$crs_outcome_2022))[2,2]
+new_cases_2022_adults_over_65
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2022_adults_over_65 / nrow(over_65)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2022_adults_over_65, n = nrow(over_65), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+over_65_2022_adults = data.frame(n=nrow(over_65),
+                                     Events = new_cases_2022_adults_over_65,
+                                     Year = "2022",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c(">65"),
+                          Population = c("Adults"))
+
+over_65_2022_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(over_65_2022_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     over_65_2022_adults$Incidence, over_65_2022_adults$LL, over_65_2022_adults$UL))
+
+over_65_2022_adults
+
+```
+
+
+###### Combine 2022 incidence
+
+```{r}
+
+adults_2022_metrics = rbind(overall_2022_adults,male_2022_adults,female_2022_adults,
+                            age_18_to_34_2022_adults,age_35_to_44_2022_adults,age_45_to_54_2022_adults,age_55_to_64_2022_adults,over_65_2022_adults)
+
+write.csv(adults_2022_metrics,"adults_2022_metrics.csv")
+
+```
+
+
+
+```{r}
+nrow(denominator_2022_adults)
+```
+
+
+### 2023 Cohort
+
+#### Denominator 2023
+
+```{r}
+denominator_2023 = objective1_data_UK
+```
+
+##### 1. Remove those with CRS diagnosis before 2023 - 68,797
+
+```{r}
+
+denominator_2023 = objective1_data_UK %>% dplyr::mutate(
+  crs_before_2021 = ifelse(!is.na(N_CRS_allDiag_before_2021),1,0),
+  crs_in_2021 = ifelse(!is.na(CRS_allDiag_2021),1,0),
+  crs_in_2022 = ifelse(!is.na(CRS_allDiag_2022),1,0)
+  
+)
+
+
+#table(denominator_2023$crs_before_2022)
+table(denominator_2023$crs_in_2022)
+
+```
+
+```{r}
+#denominator_2023 = subset(denominator_2023,denominator_2023$crs_before_2022==0)
+#denominator_2023 = subset(denominator_2023,denominator_2023$crs_in_2022==0)
+
+denominator_2023 = subset(denominator_2023,denominator_2023$crs_before_2021==0)
+denominator_2023 = subset(denominator_2023,denominator_2023$crs_in_2021==0)
+denominator_2023 = subset(denominator_2023,denominator_2023$crs_in_2022==0)
+
+```
+
+##### 2. Remove those with nasal polyps before end of 2023 - 26417
+
+```{r}
+denominator_2023 = denominator_2023 %>% dplyr::mutate(
+  nasal_polyps_before_end_of_2023 = ifelse(!is.na(nasal_polyps_date) &  nasal_polyps_date < study_end_date_2023_cohort,1,0)
+)
+
+checks_1 = denominator_2023 %>% dplyr::select(person_id,study_end_date_2023_cohort,nasal_polyps_date,nasal_polyps_before_end_of_2023)
+
+table(denominator_2023$nasal_polyps_before_end_of_2023)
+
+```
+
+
+```{r}
+denominator_2023 = subset(denominator_2023,denominator_2023$nasal_polyps_before_end_of_2023==0)
+```
+
+##### 3. Remove those with no GP visit in 2022 - 2425277
+
+```{r}
+table(denominator_2023$date_gp_appoint_2022) 
+```
+
+
+```{r}
+
+denominator_2023 = denominator_2023 %>% dplyr::mutate(
+  
+  no_gp_visit_2022 = ifelse(is.na(date_gp_appoint_2022),1,0)
+)
+
+table(denominator_2023$no_gp_visit_2022)
+
+```
+
+
+```{r}
+
+denominator_2023 = subset(denominator_2023,denominator_2023$no_gp_visit_2022==0)
+
+```
+
+##### 4. Remove those with no GP visit in 2023 - 780793
+
+```{r}
+table(denominator_2023$date_gp_appoint_2023) #Check with Sam if this includes before 2023
+```
+
+
+```{r}
+
+denominator_2023 = denominator_2023 %>% dplyr::mutate(
+  
+  no_gp_visit_2023 = ifelse(is.na(date_gp_appoint_2023),1,0)
+)
+
+table(denominator_2023$no_gp_visit_2023)
+
+```
+
+
+```{r}
+
+denominator_2023 = subset(denominator_2023,denominator_2023$no_gp_visit_2023==0)
+
+```
+
+##### 5. Remove those who died before or on start of 2023 if any (50848)
+
+```{r}
+denominator_2023$death_b4_2023 = ifelse(!is.na(denominator_2023$death_date) & denominator_2023$death_date < denominator_2023$study_start_date_2023_cohort,1,0)
+
+table(denominator_2023$death_b4_2023)
+
+```
+
+
+```{r}
+K = subset(denominator_2023,denominator_2023$death_b4_2023==1)
+
+K = K %>% dplyr::select(person_id,year_of_birth,death_date,date_gp_appoint_2023,date_gp_appoint_2024,CRS,CRS_allDiag_2023,CRS_allDiag_2024) 
+
+write.csv(K,"patients_with_data_after_death_Example2023Cohort.csv",row.names = F)
+
+```
+
+
+```{r}
+denominator_2023 = subset(denominator_2023,denominator_2023$death_b4_2023==0)
+```
+
+
+
+##### 5. Remove those with last contact date with physician before 2023 - Zero
+
+```{r}
+
+last_date_b4_2023 = subset(denominator_2023,!is.na(denominator_2023$last_observation_date) &  denominator_2023$last_observation_date < denominator_2023$study_start_date_2023_cohort)
+
+
+```
+
+
+
+#### Numerator 2023
+
+##### Those with first CRS diagnosis in 2023
+
+```{r}
+denominator_2023$crs_outcome_2023 = ifelse(!is.na(denominator_2023$CRS_date) & denominator_2023$CRS_date <= denominator_2023$study_end_date_2023_cohort,1,0)
+
+table(denominator_2023$crs_outcome_2023)
+
+```
+
+
+```{r}
+new_cases_2023=data.frame(table(denominator_2023$crs_outcome_2023))[2,2]
+new_cases_2023
+```
+
+```{r}
+k=subset(denominator_2023,denominator_2023$crs_outcome_2023==1)
+
+range(k$CRS_date)
+```
+
+
+
+
+#### Calculate age
+
+```{r}
+denominator_2023 = denominator_2023 %>% dplyr::mutate(
+  
+  age_2023 = 2023-year_of_birth
+  
+)
+
+summary(denominator_2023$age_2023)
+
+born_after_2023 = subset(denominator_2023,denominator_2023$age_2023<0) #240
+nrow(born_after_2023)
+
+```
+
+#### Exclude those born after 2023
+
+```{r}
+denominator_2023 = subset(denominator_2023,denominator_2023$age_2023>=0)
+
+summary(denominator_2023$age_2023)
+```
+
+
+#### Incidence rates
+
+##### Paediatric population
+
+```{r}
+denominator_2023_paediatrics = subset(denominator_2023,denominator_2023$age_2023<18)
+
+summary(denominator_2023_paediatrics$age_2023)
+
+nrow(denominator_2023_paediatrics)
+
+```
+
+###### Incidence rate overall
+
+```{r}
+new_cases_2023_paediatrics=data.frame(table(denominator_2023_paediatrics$crs_outcome_2023))[2,2]
+new_cases_2023_paediatrics
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_paediatrics / nrow(denominator_2023_paediatrics)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_paediatrics, n = nrow(denominator_2023_paediatrics), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+overall_2023_paediatric = data.frame(n=nrow(denominator_2023_paediatrics),
+                                     Events = new_cases_2023_paediatrics,
+                                     Year = "2023",
+                                     Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),
+                          Group = c("Overall"),
+                          Population = c("Paediatric"))
+
+overall_2023_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(overall_2023_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     overall_2023_paediatric$Incidence, overall_2023_paediatric$LL, overall_2023_paediatric$UL))
+
+overall_2023_paediatric
+
+```
+###### Incidence rate by gender
+
+```{r}
+table(denominator_2023_paediatrics$gender_code)
+```
+
+
+
+
+####### Male
+
+```{r}
+
+
+male = subset(denominator_2023_paediatrics,denominator_2023_paediatrics$gender_code=="M")
+
+new_cases_2023_paediatrics_male=data.frame(table(male$crs_outcome_2023))[2,2]
+new_cases_2023_paediatrics_male
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_paediatrics_male / nrow(male)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_paediatrics_male, n = nrow(male), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+male_2023_paediatric = data.frame(n=nrow(male),
+                                     Events = new_cases_2023_paediatrics_male,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Male"),
+                          Population = c("Paediatric"))
+
+male_2023_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(male_2023_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     male_2023_paediatric$Incidence, male_2023_paediatric$LL, male_2023_paediatric$UL))
+
+male_2023_paediatric
+
+
+
+```
+
+####### Female
+
+
+```{r}
+female = subset(denominator_2023_paediatrics,denominator_2023_paediatrics$gender_code=="F")
+
+new_cases_2023_paediatrics_female=data.frame(table(female$crs_outcome_2023))[2,2]
+new_cases_2023_paediatrics_female
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_paediatrics_female / nrow(female)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_paediatrics_female, n = nrow(female), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+female_2023_paediatric = data.frame(n=nrow(female),
+                                     Events = new_cases_2023_paediatrics_female,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Female"),
+                          Population = c("Paediatric"))
+
+female_2023_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(female_2023_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     female_2023_paediatric$Incidence, female_2023_paediatric$LL, female_2023_paediatric$UL))
+
+female_2023_paediatric
+
+
+
+
+
+
+
+```
+
+
+###### Incidence rate by AGE groups
+
+```{r}
+denominator_2023_paediatrics = denominator_2023_paediatrics %>% dplyr::mutate(
+  
+  age_cats = cut(age_2023, breaks=c(-Inf, 5, 11, 17), labels=c("0 to 5","6 to 11","12 to 17")))
+  
+summary1 = denominator_2023_paediatrics %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age_2023),
+    max   = max(age_2023),
+    n        = n()
+  )
+
+summary1
+
+
+```
+
+
+###### 0 to 5
+
+
+```{r}
+
+age_0_to_5 = subset(denominator_2023_paediatrics,denominator_2023_paediatrics$age_cats=="0 to 5")
+
+new_cases_2023_paediatrics_age_0_to_5=data.frame(table(age_0_to_5$crs_outcome_2023))[2,2]
+new_cases_2023_paediatrics_age_0_to_5
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_paediatrics_age_0_to_5 / nrow(age_0_to_5)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_paediatrics_age_0_to_5, n = nrow(age_0_to_5), conf.level = 0.95,methods = "wilson")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_0_to_5_2023_paediatric = data.frame(n=nrow(age_0_to_5),
+                                     Events = new_cases_2023_paediatrics_age_0_to_5,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("0 to 5"),
+                          Population = c("Paediatric"))
+
+age_0_to_5_2023_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_0_to_5_2023_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_0_to_5_2023_paediatric$Incidence, age_0_to_5_2023_paediatric$LL, age_0_to_5_2023_paediatric$UL))
+
+age_0_to_5_2023_paediatric
+
+
+
+
+
+
+```
+
+
+
+###### 6 to 11
+
+
+```{r}
+
+age_6_to_11 = subset(denominator_2023_paediatrics,denominator_2023_paediatrics$age_cats=="6 to 11")
+
+new_cases_2023_paediatrics_age_6_to_11=data.frame(table(age_6_to_11$crs_outcome_2023))[2,2]
+new_cases_2023_paediatrics_age_6_to_11
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_paediatrics_age_6_to_11 / nrow(age_6_to_11)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_paediatrics_age_6_to_11, n = nrow(age_6_to_11), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_6_to_11_2023_paediatric = data.frame(n=nrow(age_6_to_11),
+                                     Events = new_cases_2023_paediatrics_age_6_to_11,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("6 to 11"),
+                          Population = c("Paediatric"))
+
+age_6_to_11_2023_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_6_to_11_2023_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_6_to_11_2023_paediatric$Incidence, age_6_to_11_2023_paediatric$LL, age_6_to_11_2023_paediatric$UL))
+
+age_6_to_11_2023_paediatric
+
+```
+
+###### 12 to 17
+
+
+```{r}
+
+age_12_to_17 = subset(denominator_2023_paediatrics,denominator_2023_paediatrics$age_cats=="12 to 17")
+
+new_cases_2023_paediatrics_age_12_to_17=data.frame(table(age_12_to_17$crs_outcome_2023))[2,2]
+new_cases_2023_paediatrics_age_12_to_17
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_paediatrics_age_12_to_17 / nrow(age_12_to_17)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_paediatrics_age_12_to_17, n = nrow(age_12_to_17), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_12_to_17_2023_paediatric = data.frame(n=nrow(age_12_to_17),
+                                     Events = new_cases_2023_paediatrics_age_12_to_17,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("12 to 17"),
+                          Population = c("Paediatric"))
+
+age_12_to_17_2023_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_12_to_17_2023_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_12_to_17_2023_paediatric$Incidence, age_12_to_17_2023_paediatric$LL, age_12_to_17_2023_paediatric$UL))
+
+age_12_to_17_2023_paediatric
+
+
+```
+
+###### Combine 2023 incidence
+
+```{r}
+
+paediatric_2023_metrics = rbind(overall_2023_paediatric,male_2023_paediatric,female_2023_paediatric,age_0_to_5_2023_paediatric,age_6_to_11_2023_paediatric,age_12_to_17_2023_paediatric)
+
+write.csv(paediatric_2023_metrics,"paediatric_2023_metrics.csv")
+
+```
+
+
+
+#### Adults population
+
+```{r}
+denominator_2023_adults = subset(denominator_2023,denominator_2023$age_2023>=18)
+
+summary(denominator_2023_adults$age_2023)
+
+nrow(denominator_2023_adults)
+
+```
+
+###### Incidence rate overall
+
+```{r}
+new_cases_2023_adults=data.frame(table(denominator_2023_adults$crs_outcome_2023))[2,2]
+new_cases_2023_adults
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults / nrow(denominator_2023_adults)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults, n = nrow(denominator_2023_adults), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+overall_2023_adults = data.frame(n=nrow(denominator_2023_adults),
+                                     Events = new_cases_2023_adults,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Overall"),
+                          Population = c("Adults"))
+
+overall_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(overall_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     overall_2023_adults$Incidence, overall_2023_adults$LL, overall_2023_adults$UL))
+
+overall_2023_adults
+
+```
+###### Incidence rate by gender
+
+```{r}
+table(denominator_2023_adults$gender_code)
+```
+
+
+
+
+####### Male
+
+```{r}
+
+
+male = subset(denominator_2023_adults,denominator_2023_adults$gender_code=="M")
+
+new_cases_2023_adults_male=data.frame(table(male$crs_outcome_2023))[2,2]
+new_cases_2023_adults_male
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_male / nrow(male)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_male, n = nrow(male), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+male_2023_adults = data.frame(n=nrow(male),
+                                     Events = new_cases_2023_adults_male,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Male"),
+                          Population = c("Adults"))
+
+male_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(male_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     male_2023_adults$Incidence, male_2023_adults$LL, male_2023_adults$UL))
+
+male_2023_adults
+
+```
+
+####### Female
+
+
+```{r}
+female = subset(denominator_2023_adults,denominator_2023_adults$gender_code=="F")
+
+new_cases_2023_adults_female=data.frame(table(female$crs_outcome_2023))[2,2]
+new_cases_2023_adults_female
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_female / nrow(female)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_female, n = nrow(female), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+female_2023_adults = data.frame(n=nrow(female),
+                                     Events = new_cases_2023_adults_female,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Female"),
+                          Population = c("Adults"))
+
+female_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(female_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     female_2023_adults$Incidence, female_2023_adults$LL, female_2023_adults$UL))
+
+female_2023_adults
+
+```
+
+
+###### Incidence rate by AGE groups
+
+```{r}
+denominator_2023_adults = denominator_2023_adults %>% dplyr::mutate(
+  
+  age_cats = cut(age_2023, breaks=c(-Inf, 34, 44, 54, 64,102), labels=c("18 to 34","35 to 44","45 to 54","55 to 64",">65")))
+  
+summary1 = denominator_2023_adults %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age_2023),
+    max   = max(age_2023),
+    n        = n()
+  )
+
+summary1
+
+
+```
+
+
+###### 18 to 34
+
+
+```{r}
+
+age_18_to_34 = subset(denominator_2023_adults,denominator_2023_adults$age_cats=="18 to 34")
+
+new_cases_2023_adults_age_18_to_34=data.frame(table(age_18_to_34$crs_outcome_2023))[2,2]
+new_cases_2023_adults_age_18_to_34
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_age_18_to_34 / nrow(age_18_to_34)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_age_18_to_34, n = nrow(age_18_to_34), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_18_to_34_2023_adults = data.frame(n=nrow(age_18_to_34),
+                                     Events = new_cases_2023_adults_age_18_to_34,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("18 to 34"),
+                          Population = c("Adults"))
+
+age_18_to_34_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_18_to_34_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_18_to_34_2023_adults$Incidence, age_18_to_34_2023_adults$LL, age_18_to_34_2023_adults$UL))
+
+age_18_to_34_2023_adults
+
+```
+
+###### 35 to 44
+
+```{r}
+
+age_35_to_44 = subset(denominator_2023_adults,denominator_2023_adults$age_cats=="35 to 44")
+
+new_cases_2023_adults_age_35_to_44=data.frame(table(age_35_to_44$crs_outcome_2023))[2,2]
+new_cases_2023_adults_age_35_to_44
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_age_35_to_44 / nrow(age_35_to_44)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_age_35_to_44, n = nrow(age_35_to_44), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_35_to_44_2023_adults = data.frame(n=nrow(age_35_to_44),
+                                     Events = new_cases_2023_adults_age_35_to_44,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("35 to 44"),
+                          Population = c("Adults"))
+
+age_35_to_44_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_35_to_44_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_35_to_44_2023_adults$Incidence, age_35_to_44_2023_adults$LL, age_35_to_44_2023_adults$UL))
+
+age_35_to_44_2023_adults
+
+```
+
+###### 45 to 54
+
+
+```{r}
+
+age_45_to_54 = subset(denominator_2023_adults,denominator_2023_adults$age_cats=="45 to 54")
+
+new_cases_2023_adults_age_45_to_54=data.frame(table(age_45_to_54$crs_outcome_2023))[2,2]
+new_cases_2023_adults_age_45_to_54
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_age_45_to_54 / nrow(age_45_to_54)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_age_45_to_54, n = nrow(age_45_to_54), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_45_to_54_2023_adults = data.frame(n=nrow(age_45_to_54),
+                                     Events = new_cases_2023_adults_age_45_to_54,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("45 to 54"),
+                          Population = c("Adults"))
+
+age_45_to_54_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_45_to_54_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_45_to_54_2023_adults$Incidence, age_45_to_54_2023_adults$LL, age_45_to_54_2023_adults$UL))
+
+age_45_to_54_2023_adults
+
+```
+
+###### 55 to 64
+
+
+```{r}
+
+age_55_to_64 = subset(denominator_2023_adults,denominator_2023_adults$age_cats=="55 to 64")
+
+new_cases_2023_adults_age_55_to_64=data.frame(table(age_55_to_64$crs_outcome_2023))[2,2]
+new_cases_2023_adults_age_55_to_64
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_age_55_to_64 / nrow(age_55_to_64)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_age_55_to_64, n = nrow(age_55_to_64), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_55_to_64_2023_adults = data.frame(n=nrow(age_55_to_64),
+                                     Events = new_cases_2023_adults_age_55_to_64,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("55 to 64"),
+                          Population = c("Adults"))
+
+age_55_to_64_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_55_to_64_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_55_to_64_2023_adults$Incidence, age_55_to_64_2023_adults$LL, age_55_to_64_2023_adults$UL))
+
+age_55_to_64_2023_adults
+
+```
+
+###### Over 65
+
+
+```{r}
+
+over_65 = subset(denominator_2023_adults,denominator_2023_adults$age_cats==">65")
+
+new_cases_2023_adults_over_65=data.frame(table(over_65$crs_outcome_2023))[2,2]
+new_cases_2023_adults_over_65
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2023_adults_over_65 / nrow(over_65)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2023_adults_over_65, n = nrow(over_65), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+over_65_2023_adults = data.frame(n=nrow(over_65),
+                                     Events = new_cases_2023_adults_over_65,
+                                     Year = "2023",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c(">65"),
+                          Population = c("Adults"))
+
+over_65_2023_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(over_65_2023_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     over_65_2023_adults$Incidence, over_65_2023_adults$LL, over_65_2023_adults$UL))
+
+over_65_2023_adults
+
+```
+
+
+###### Combine 2023 incidence
+
+```{r}
+
+adults_2023_metrics = rbind(overall_2023_adults,male_2023_adults,female_2023_adults,
+                            age_18_to_34_2023_adults,age_35_to_44_2023_adults,age_45_to_54_2023_adults,age_55_to_64_2023_adults,over_65_2023_adults)
+
+write.csv(adults_2023_metrics,"adults_2023_metrics.csv")
+
+```
+
+
+
+### 2024 Cohort
+
+#### Denominator 2024
+
+```{r}
+denominator_2024 = objective1_data_UK
+```
+
+##### 1. Remove those with CRS diagnosis before 2024 - 68,797
+
+```{r}
+
+denominator_2024 = objective1_data_UK %>% dplyr::mutate(
+  #crs_before_2024 = ifelse(!is.na(CRS_date) &  CRS_date < study_start_date_2024_cohort,1,0),
+  crs_before_2021 = ifelse(!is.na(N_CRS_allDiag_before_2021),1,0),
+  crs_in_2021 = ifelse(!is.na(CRS_allDiag_2021),1,0),
+  crs_in_2022 = ifelse(!is.na(CRS_allDiag_2022),1,0),
+  crs_in_2023 = ifelse(!is.na(CRS_allDiag_2023),1,0)
+  
+)
+
+
+#table(denominator_2024$crs_before_2022)
+table(denominator_2024$crs_in_2023)
+
+```
+
+```{r}
+#denominator_2024 = subset(denominator_2024,denominator_2024$crs_before_2022==0)
+
+
+denominator_2024 = subset(denominator_2024,denominator_2024$crs_before_2021==0)
+denominator_2024 = subset(denominator_2024,denominator_2024$crs_in_2021==0)
+denominator_2024 = subset(denominator_2024,denominator_2024$crs_in_2022==0)
+denominator_2024 = subset(denominator_2024,denominator_2024$crs_in_2023==0)
+
+
+
+```
+
+##### 2. Remove those with nasal polyps before end of 2024 - 26417
+
+```{r}
+denominator_2024 = denominator_2024 %>% dplyr::mutate(
+  nasal_polyps_before_end_of_2024 = ifelse(!is.na(nasal_polyps_date) &  nasal_polyps_date < study_end_date_2024_cohort,1,0)
+)
+
+checks_1 = denominator_2024 %>% dplyr::select(person_id,study_end_date_2024_cohort,nasal_polyps_date,nasal_polyps_before_end_of_2024)
+
+table(denominator_2024$nasal_polyps_before_end_of_2024)
+
+```
+
+
+```{r}
+denominator_2024 = subset(denominator_2024,denominator_2024$nasal_polyps_before_end_of_2024==0)
+```
+
+##### 3. Remove those with no GP visit in 2023 - 2425277
+
+```{r}
+table(denominator_2024$date_gp_appoint_2023) 
+```
+
+
+```{r}
+
+denominator_2024 = denominator_2024 %>% dplyr::mutate(
+  
+  no_gp_visit_2023 = ifelse(is.na(date_gp_appoint_2023),1,0)
+)
+
+table(denominator_2024$no_gp_visit_2023)
+
+```
+
+
+```{r}
+
+denominator_2024 = subset(denominator_2024,denominator_2024$no_gp_visit_2023==0)
+
+```
+
+##### 4. Remove those with no GP visit in 2024 - 780793
+
+```{r}
+table(denominator_2024$date_gp_appoint_2024) #Check with Sam if this includes before 2024
+```
+
+
+```{r}
+
+denominator_2024 = denominator_2024 %>% dplyr::mutate(
+  
+  no_gp_visit_2024 = ifelse(is.na(date_gp_appoint_2024),1,0)
+)
+
+table(denominator_2024$no_gp_visit_2024)
+
+```
+
+
+```{r}
+
+denominator_2024 = subset(denominator_2024,denominator_2024$no_gp_visit_2024==0)
+
+```
+
+##### 5. Remove those who died before or on start of 2024 if any (50848)
+
+```{r}
+denominator_2024$death_b4_2024 = ifelse(!is.na(denominator_2024$death_date) & denominator_2024$death_date < denominator_2024$study_start_date_2024_cohort,1,0)
+
+table(denominator_2024$death_b4_2024)
+
+```
+
+
+```{r}
+denominator_2024 = subset(denominator_2024,denominator_2024$death_b4_2024==0)
+```
+
+
+
+##### 5. Remove those with last contact date with physician before 2024 - Zero
+
+```{r}
+
+last_date_b4_2024 = subset(denominator_2024,!is.na(denominator_2024$last_observation_date) &  denominator_2024$last_observation_date < denominator_2024$study_start_date_2024_cohort)
+
+nrow(last_date_b4_2024)
+
+```
+
+#### Numerator 2024
+
+##### Those with first CRS diagnosis in 2024
+
+```{r}
+denominator_2024$crs_outcome_2024 = ifelse(!is.na(denominator_2024$CRS_date) & denominator_2024$CRS_date <= denominator_2024$study_end_date_2024_cohort,1,0)
+
+table(denominator_2024$crs_outcome_2024)
+
+```
+
+
+
+```{r}
+new_cases_2024=data.frame(table(denominator_2024$crs_outcome_2024))[2,2]
+new_cases_2024
+```
+
+```{r}
+k=subset(denominator_2024,denominator_2024$crs_outcome_2024==1)
+
+range(k$CRS_date)
+```
+
+
+
+
+#### Calculate age
+
+```{r}
+denominator_2024 = denominator_2024 %>% dplyr::mutate(
+  
+  age_2024 = 2024-year_of_birth
+  
+)
+
+summary(denominator_2024$age_2024)
+
+born_after_2024 = subset(denominator_2024,denominator_2024$age_2024<0) #240
+nrow(born_after_2024)
+
+```
+
+#### Exclude those born after 2024
+
+```{r}
+denominator_2024 = subset(denominator_2024,denominator_2024$age_2024>=0)
+
+summary(denominator_2024$age_2024)
+```
+
+
+#### Incidence rates
+
+##### Paediatric population
+
+```{r}
+denominator_2024_paediatrics = subset(denominator_2024,denominator_2024$age_2024<18)
+
+summary(denominator_2024_paediatrics$age_2024)
+
+nrow(denominator_2024_paediatrics)
+
+```
+
+###### Incidence rate overall
+
+```{r}
+new_cases_2024_paediatrics=data.frame(table(denominator_2024_paediatrics$crs_outcome_2024))[2,2]
+new_cases_2024_paediatrics
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_paediatrics / nrow(denominator_2024_paediatrics)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_paediatrics, n = nrow(denominator_2024_paediatrics), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+overall_2024_paediatric = data.frame(n=nrow(denominator_2024_paediatrics),
+                                     Events = new_cases_2024_paediatrics,
+                                     Year = "2024",
+                                     Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),
+                          Group = c("Overall"),
+                          Population = c("Paediatric"))
+
+overall_2024_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(overall_2024_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     overall_2024_paediatric$Incidence, overall_2024_paediatric$LL, overall_2024_paediatric$UL))
+
+overall_2024_paediatric
+
+```
+###### Incidence rate by gender
+
+```{r}
+table(denominator_2024_paediatrics$gender_code)
+```
+
+
+
+
+####### Male
+
+```{r}
+
+
+male = subset(denominator_2024_paediatrics,denominator_2024_paediatrics$gender_code=="M")
+
+new_cases_2024_paediatrics_male=data.frame(table(male$crs_outcome_2024))[2,2]
+new_cases_2024_paediatrics_male
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_paediatrics_male / nrow(male)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_paediatrics_male, n = nrow(male), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+male_2024_paediatric = data.frame(n=nrow(male),
+                                     Events = new_cases_2024_paediatrics_male,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Male"),
+                          Population = c("Paediatric"))
+
+male_2024_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(male_2024_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     male_2024_paediatric$Incidence, male_2024_paediatric$LL, male_2024_paediatric$UL))
+
+male_2024_paediatric
+
+
+
+```
+
+####### Female
+
+
+```{r}
+female = subset(denominator_2024_paediatrics,denominator_2024_paediatrics$gender_code=="F")
+
+new_cases_2024_paediatrics_female=data.frame(table(female$crs_outcome_2024))[2,2]
+new_cases_2024_paediatrics_female
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_paediatrics_female / nrow(female)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_paediatrics_female, n = nrow(female), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+female_2024_paediatric = data.frame(n=nrow(female),
+                                     Events = new_cases_2024_paediatrics_female,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Female"),
+                          Population = c("Paediatric"))
+
+female_2024_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(female_2024_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     female_2024_paediatric$Incidence, female_2024_paediatric$LL, female_2024_paediatric$UL))
+
+female_2024_paediatric
+
+
+
+
+
+
+
+```
+
+
+###### Incidence rate by AGE groups
+
+```{r}
+denominator_2024_paediatrics = denominator_2024_paediatrics %>% dplyr::mutate(
+  
+  age_cats = cut(age_2024, breaks=c(-Inf, 5, 11, 17), labels=c("0 to 5","6 to 11","12 to 17")))
+  
+summary1 = denominator_2024_paediatrics %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age_2024),
+    max   = max(age_2024),
+    n        = n()
+  )
+
+summary1
+
+
+```
+
+
+###### 0 to 5
+
+
+```{r}
+
+age_0_to_5 = subset(denominator_2024_paediatrics,denominator_2024_paediatrics$age_cats=="0 to 5")
+
+new_cases_2024_paediatrics_age_0_to_5=data.frame(table(age_0_to_5$crs_outcome_2024))[2,2]
+new_cases_2024_paediatrics_age_0_to_5
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_paediatrics_age_0_to_5 / nrow(age_0_to_5)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_paediatrics_age_0_to_5, n = nrow(age_0_to_5), conf.level = 0.95,methods = "wilson")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_0_to_5_2024_paediatric = data.frame(n=nrow(age_0_to_5),
+                                     Events = new_cases_2024_paediatrics_age_0_to_5,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("0 to 5"),
+                          Population = c("Paediatric"))
+
+age_0_to_5_2024_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_0_to_5_2024_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_0_to_5_2024_paediatric$Incidence, age_0_to_5_2024_paediatric$LL, age_0_to_5_2024_paediatric$UL))
+
+age_0_to_5_2024_paediatric
+
+
+
+
+
+
+```
+
+
+
+###### 6 to 11
+
+
+```{r}
+
+age_6_to_11 = subset(denominator_2024_paediatrics,denominator_2024_paediatrics$age_cats=="6 to 11")
+
+new_cases_2024_paediatrics_age_6_to_11=data.frame(table(age_6_to_11$crs_outcome_2024))[2,2]
+new_cases_2024_paediatrics_age_6_to_11
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_paediatrics_age_6_to_11 / nrow(age_6_to_11)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_paediatrics_age_6_to_11, n = nrow(age_6_to_11), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_6_to_11_2024_paediatric = data.frame(n=nrow(age_6_to_11),
+                                     Events = new_cases_2024_paediatrics_age_6_to_11,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("6 to 11"),
+                          Population = c("Paediatric"))
+
+age_6_to_11_2024_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_6_to_11_2024_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_6_to_11_2024_paediatric$Incidence, age_6_to_11_2024_paediatric$LL, age_6_to_11_2024_paediatric$UL))
+
+age_6_to_11_2024_paediatric
+
+```
+
+###### 12 to 17
+
+
+```{r}
+
+age_12_to_17 = subset(denominator_2024_paediatrics,denominator_2024_paediatrics$age_cats=="12 to 17")
+
+new_cases_2024_paediatrics_age_12_to_17=data.frame(table(age_12_to_17$crs_outcome_2024))[2,2]
+new_cases_2024_paediatrics_age_12_to_17
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_paediatrics_age_12_to_17 / nrow(age_12_to_17)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_paediatrics_age_12_to_17, n = nrow(age_12_to_17), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_12_to_17_2024_paediatric = data.frame(n=nrow(age_12_to_17),
+                                     Events = new_cases_2024_paediatrics_age_12_to_17,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("12 to 17"),
+                          Population = c("Paediatric"))
+
+age_12_to_17_2024_paediatric$"Incidence per 100 (95% CI)" = ifelse(is.na(age_12_to_17_2024_paediatric$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_12_to_17_2024_paediatric$Incidence, age_12_to_17_2024_paediatric$LL, age_12_to_17_2024_paediatric$UL))
+
+age_12_to_17_2024_paediatric
+
+
+```
+
+###### Combine 2024 incidence
+
+```{r}
+
+paediatric_2024_metrics = rbind(overall_2024_paediatric,male_2024_paediatric,female_2024_paediatric,age_0_to_5_2024_paediatric,age_6_to_11_2024_paediatric,age_12_to_17_2024_paediatric)
+
+write.csv(paediatric_2024_metrics,"paediatric_2024_metrics.csv")
+
+```
+
+
+
+#### Adults population
+
+```{r}
+denominator_2024_adults = subset(denominator_2024,denominator_2024$age_2024>=18)
+
+summary(denominator_2024_adults$age_2024)
+
+nrow(denominator_2024_adults)
+
+```
+
+###### Incidence rate overall
+
+```{r}
+new_cases_2024_adults=data.frame(table(denominator_2024_adults$crs_outcome_2024))[2,2]
+new_cases_2024_adults
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults / nrow(denominator_2024_adults)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults, n = nrow(denominator_2024_adults), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+overall_2024_adults = data.frame(n=nrow(denominator_2024_adults),
+                                     Events = new_cases_2024_adults,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Overall"),
+                          Population = c("Adults"))
+
+overall_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(overall_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     overall_2024_adults$Incidence, overall_2024_adults$LL, overall_2024_adults$UL))
+
+overall_2024_adults
+
+```
+###### Incidence rate by gender
+
+```{r}
+table(denominator_2024_adults$gender_code)
+```
+
+
+
+
+####### Male
+
+```{r}
+
+
+male = subset(denominator_2024_adults,denominator_2024_adults$gender_code=="M")
+
+new_cases_2024_adults_male=data.frame(table(male$crs_outcome_2024))[2,2]
+new_cases_2024_adults_male
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_male / nrow(male)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_male, n = nrow(male), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+male_2024_adults = data.frame(n=nrow(male),
+                                     Events = new_cases_2024_adults_male,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Male"),
+                          Population = c("Adults"))
+
+male_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(male_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     male_2024_adults$Incidence, male_2024_adults$LL, male_2024_adults$UL))
+
+male_2024_adults
+
+```
+
+####### Female
+
+
+```{r}
+female = subset(denominator_2024_adults,denominator_2024_adults$gender_code=="F")
+
+new_cases_2024_adults_female=data.frame(table(female$crs_outcome_2024))[2,2]
+new_cases_2024_adults_female
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_female / nrow(female)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_female, n = nrow(female), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+female_2024_adults = data.frame(n=nrow(female),
+                                     Events = new_cases_2024_adults_female,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("Female"),
+                          Population = c("Adults"))
+
+female_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(female_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     female_2024_adults$Incidence, female_2024_adults$LL, female_2024_adults$UL))
+
+female_2024_adults
+
+```
+
+
+###### Incidence rate by AGE groups
+
+```{r}
+denominator_2024_adults = denominator_2024_adults %>% dplyr::mutate(
+  
+  age_cats = cut(age_2024, breaks=c(-Inf, 34, 44, 54, 64,102), labels=c("18 to 34","35 to 44","45 to 54","55 to 64",">65")))
+  
+summary1 = denominator_2024_adults %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age_2024),
+    max   = max(age_2024),
+    n        = n()
+  )
+
+summary1
+
+
+```
+
+
+###### 18 to 34
+
+
+```{r}
+
+age_18_to_34 = subset(denominator_2024_adults,denominator_2024_adults$age_cats=="18 to 34")
+
+new_cases_2024_adults_age_18_to_34=data.frame(table(age_18_to_34$crs_outcome_2024))[2,2]
+new_cases_2024_adults_age_18_to_34
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_age_18_to_34 / nrow(age_18_to_34)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_age_18_to_34, n = nrow(age_18_to_34), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_18_to_34_2024_adults = data.frame(n=nrow(age_18_to_34),
+                                     Events = new_cases_2024_adults_age_18_to_34,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("18 to 34"),
+                          Population = c("Adults"))
+
+age_18_to_34_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_18_to_34_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_18_to_34_2024_adults$Incidence, age_18_to_34_2024_adults$LL, age_18_to_34_2024_adults$UL))
+
+age_18_to_34_2024_adults
+
+```
+
+###### 35 to 44
+
+```{r}
+
+age_35_to_44 = subset(denominator_2024_adults,denominator_2024_adults$age_cats=="35 to 44")
+
+new_cases_2024_adults_age_35_to_44=data.frame(table(age_35_to_44$crs_outcome_2024))[2,2]
+new_cases_2024_adults_age_35_to_44
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_age_35_to_44 / nrow(age_35_to_44)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_age_35_to_44, n = nrow(age_35_to_44), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_35_to_44_2024_adults = data.frame(n=nrow(age_35_to_44),
+                                     Events = new_cases_2024_adults_age_35_to_44,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("35 to 44"),
+                          Population = c("Adults"))
+
+age_35_to_44_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_35_to_44_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_35_to_44_2024_adults$Incidence, age_35_to_44_2024_adults$LL, age_35_to_44_2024_adults$UL))
+
+age_35_to_44_2024_adults
+
+```
+
+###### 45 to 54
+
+
+```{r}
+
+age_45_to_54 = subset(denominator_2024_adults,denominator_2024_adults$age_cats=="45 to 54")
+
+new_cases_2024_adults_age_45_to_54=data.frame(table(age_45_to_54$crs_outcome_2024))[2,2]
+new_cases_2024_adults_age_45_to_54
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_age_45_to_54 / nrow(age_45_to_54)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_age_45_to_54, n = nrow(age_45_to_54), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_45_to_54_2024_adults = data.frame(n=nrow(age_45_to_54),
+                                     Events = new_cases_2024_adults_age_45_to_54,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("45 to 54"),
+                          Population = c("Adults"))
+
+age_45_to_54_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_45_to_54_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_45_to_54_2024_adults$Incidence, age_45_to_54_2024_adults$LL, age_45_to_54_2024_adults$UL))
+
+age_45_to_54_2024_adults
+
+```
+
+###### 55 to 64
+
+
+```{r}
+
+age_55_to_64 = subset(denominator_2024_adults,denominator_2024_adults$age_cats=="55 to 64")
+
+new_cases_2024_adults_age_55_to_64=data.frame(table(age_55_to_64$crs_outcome_2024))[2,2]
+new_cases_2024_adults_age_55_to_64
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_age_55_to_64 / nrow(age_55_to_64)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_age_55_to_64, n = nrow(age_55_to_64), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+age_55_to_64_2024_adults = data.frame(n=nrow(age_55_to_64),
+                                     Events = new_cases_2024_adults_age_55_to_64,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c("55 to 64"),
+                          Population = c("Adults"))
+
+age_55_to_64_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(age_55_to_64_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     age_55_to_64_2024_adults$Incidence, age_55_to_64_2024_adults$LL, age_55_to_64_2024_adults$UL))
+
+age_55_to_64_2024_adults
+
+```
+
+###### Over 65
+
+
+```{r}
+
+over_65 = subset(denominator_2024_adults,denominator_2024_adults$age_cats==">65")
+
+new_cases_2024_adults_over_65=data.frame(table(over_65$crs_outcome_2024))[2,2]
+new_cases_2024_adults_over_65
+
+
+# Calculate incidence per 100 patients
+incidence <- (new_cases_2024_adults_over_65 / nrow(over_65)) * 100
+
+# Calculate 95% confidence interval using binom.confint (asymptotic method)
+ci <- binom.confint(x = new_cases_2024_adults_over_65, n = nrow(over_65), conf.level = 0.95,methods = "asymptotic")
+
+# Extract lower and upper bounds (in proportion)
+lower_ci <- ci$lower * 100
+upper_ci <- ci$upper * 100
+
+over_65_2024_adults = data.frame(n=nrow(over_65),
+                                     Events = new_cases_2024_adults_over_65,
+                                     Year = "2024",Incidence = c(incidence),
+                          LL = c(lower_ci),
+                          UL = c(upper_ci),Group = c(">65"),
+                          Population = c("Adults"))
+
+over_65_2024_adults$"Incidence per 100 (95% CI)" = ifelse(is.na(over_65_2024_adults$Incidence), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     over_65_2024_adults$Incidence, over_65_2024_adults$LL, over_65_2024_adults$UL))
+
+over_65_2024_adults
+
+```
+
+
+###### Combine 2024 incidence
+
+```{r}
+
+adults_2024_metrics = rbind(overall_2024_adults,male_2024_adults,female_2024_adults,
+                            age_18_to_34_2024_adults,age_35_to_44_2024_adults,age_45_to_54_2024_adults,age_55_to_64_2024_adults,over_65_2024_adults)
+
+write.csv(adults_2024_metrics,"adults_2024_metrics.csv")
+
+```
+
+#### Combine all 
+
+```{r}
+
+combined = rbind(paediatric_2022_metrics,paediatric_2023_metrics,paediatric_2024_metrics,
+                 adults_2022_metrics,adults_2023_metrics,adults_2024_metrics)
+
+combined = combined[,c(8,7,3,1,2,4:6,9)]
+
+write.csv(combined,"Combined_UK_Crude.csv",row.names = F)
+
+```
+
+##### Plot
+
+###### Paediatic population
+
+```{r}
+paeds = subset(combined,combined$Population=="Paediatric")
+
+library(ggplot2)
+library(tidyverse)
+
+dodge_width = 0.9
+
+paeds$Group = factor(paeds$Group,levels = c("Overall","Male","Female","0 to 5","6 to 11","12 to 17"))
+
+
+p3=ggplot(paeds, aes(x=Year, y=Incidence, fill=Year, color =Year)) +
+  geom_point(position=position_dodge(0.5),size=8)+ylab("Incidence per 100 patients (95% CI)")+xlab("Year")+
+  geom_errorbar(aes(ymin=LL, ymax=UL), width=0.2,size=3,
+                 position=position_dodge(0.5))+theme_bw() + ylim(0,0.05)+
+  facet_wrap(~Group,ncol = 3, scales = "free_y")+
+  theme(text = element_text(size=50,face="bold",hjust = 0.5),
+        axis.title=element_text(size=50,face="bold"),
+        axis.text.x = element_text(angle=90, hjust=1,vjust = 1,size = 50),
+        axis.text.y = element_text(size = 50),
+        axis.text=element_text(size=50),legend.position = "none")
+
+
+ggsave(p3,filename = "Paediatrics Plot.jpeg",width = 48,height = 49, dpi=300)
+
+```
+
+
+###### Adults population
+
+
+```{r}
+
+adults = subset(combined,combined$Population=="Adults")
+
+library(ggplot2)
+library(tidyverse)
+
+dodge_width = 0.9
+
+
+adults$Group = factor(adults$Group,levels = c("Overall","Male","Female","18 to 34","35 to 44","45 to 54","55 to 64",">65"))
+
+
+p3=ggplot(adults, aes(x=Year, y=Incidence, fill=Year, color=Year)) +
+  geom_point(position=position_dodge(0.5),size=8)+ylab("Incidence per 100 patients (95% CI)")+xlab("Year")+
+  geom_errorbar(aes(ymin=LL, ymax=UL), width=0.2,size=3,
+                 position=position_dodge(0.5))+theme_bw() + ylim(0,0.15)+
+  facet_wrap(~Group,ncol = 3, scales = "free_y")+
+  theme(text = element_text(size=50,face="bold",hjust = 0.5),
+        axis.title=element_text(size=50,face="bold"),
+        axis.text.x = element_text(angle=90, hjust=1,vjust = 1,size = 50),
+        axis.text.y = element_text(size = 50),
+        axis.text=element_text(size=50),legend.position = "none")
+
+
+ggsave(p3,filename = "Adults Plot.jpeg",width = 48,height = 49, dpi=300)
+
+
+```
+
+
+### Results in Client format table
+
+#### Incidence only no CIs
+
+```{r}
+
+### PAEDS
+paeds1 = paeds %>% dplyr::select(Group, Year, Incidence)
+paeds1 = paeds1 %>% tidyr::spread(Year,Incidence)
+paeds1$Population = "Paediatrics"
+
+
+### Adults
+adults1 = adults %>% dplyr::select(Group, Year, Incidence)
+adults1 = adults1 %>% tidyr::spread(Year,Incidence)
+adults1$Population = "Adults"
+
+crude_incidence_UK = rbind(paeds1,adults1)
+
+write.csv(crude_incidence_UK,"Crude_Incidence_NoCIs_UK.csv")
+
+```
+
+
+#### Incidence with CIs
+
+```{r}
+
+### PAEDS
+
+paeds1 = paeds %>% dplyr::select("Group", "Year", "Incidence per 100 (95% CI)")
+paeds1 = paeds1 %>% tidyr::spread("Year","Incidence per 100 (95% CI)")
+paeds1$Population = "Paediatrics"
+
+
+### Adults
+
+adults1 = adults %>% dplyr::select("Group", "Year", "Incidence per 100 (95% CI)")
+adults1 = adults1 %>% tidyr::spread("Year","Incidence per 100 (95% CI)")
+adults1$Population = "Adults"
+
+crude_incidence2_UK = rbind(paeds1,adults1)
+
+write.csv(crude_incidence2_UK,"Crude_Incidence_WithCIs_UK.csv")
+
+
+```
+
+
+### Standardized Incidence
+
+#### Combine all years denom
+
+```{r}
+
+denominator_2022_adults$Dataset = "Adult"
+denominator_2022_paediatrics$Dataset = "Paediatics"
+denom_year_2022 = rbind(denominator_2022_adults,denominator_2022_paediatrics)
+denom_year_2022$Year = "2022"
+
+denom_year_2022 = denom_year_2022 %>% dplyr::select(person_id,age_cats,gender_code,crs_outcome_2022,Year,Dataset) %>% dplyr::rename(event_indicator=crs_outcome_2022)
+
+
+denominator_2023_adults$Dataset = "Adult"
+denominator_2023_paediatrics$Dataset = "Paediatics"
+denom_year_2023 = rbind(denominator_2023_adults,denominator_2023_paediatrics)
+denom_year_2023$Year = "2023"
+
+denom_year_2023 = denom_year_2023 %>% dplyr::select(person_id,age_cats,gender_code,crs_outcome_2023,Year,Dataset) %>% dplyr::rename(event_indicator=crs_outcome_2023)
+
+denominator_2024_adults$Dataset = "Adult"
+denominator_2024_paediatrics$Dataset = "Paediatics"
+denom_year_2024 = rbind(denominator_2024_adults,denominator_2024_paediatrics)
+denom_year_2024$Year = "2024"
+
+denom_year_2024 = denom_year_2024 %>% dplyr::select(person_id,age_cats,gender_code,crs_outcome_2024,Year,Dataset) %>% dplyr::rename(event_indicator=crs_outcome_2024)
+
+combined_uk_data = rbind(denom_year_2022,denom_year_2023,denom_year_2024)
+
+
+```
+
+
+```{r}
+
+
+
+
+```
+
+
+
+#### Aggregate data by sex and gender
+
+```{r}
+
+aggregated_data = combined_uk_data %>% dplyr::group_by(age_cats,gender_code,Year,Dataset) %>% dplyr::summarise(
+  
+  pop=n(),
+  events = sum(event_indicator)
+  
+)
+
+```
+
+
+#### Import standard population
+
+```{r}
+
+standard_population = read.csv("/rds/projects/w/wangzz-thin-tardyferon/rhinoNasal/Data analysis/Eurostat/227097786699562_uk_Census_2021.csv")
+
+standard_population$age1 = 0:90
+
+standard_population$age_cats = cut(standard_population$age1, breaks=c(-Inf, 5, 11, 17,34,44,54,64,100), labels=c("0 to 5","6 to 11","12 to 17","18 to 34","35 to 44","45 to 54","55 to 64",">65"))
+
+
+summary1 = standard_population %>%
+  group_by(age_cats) %>%
+  summarise(
+    min = min(age1),
+    max   = max(age1),
+    n        = n()
+  )
+
+summary1  
+
+```
+
+
+```{r}
+standard_population = standard_population %>% dplyr::select(
+  
+  age_cats,Female,Male
+  
+)
+
+standard_population = reshape2::melt(standard_population,id="age_cats")
+names(standard_population) = c("age_cats","sex","stdpop")
+
+
+### Aggregate by age groups
+standard_population = standard_population %>% dplyr::group_by(age_cats,sex) %>%
+  dplyr::summarise(stdpop=sum(stdpop))
+
+
+
+```
+
+
+#### Merge datasets above
+
+```{r}
+glimpse(aggregated_data)
+```
+```{r}
+glimpse(standard_population)
+```
+
+
+
+```{r}
+
+table(aggregated_data$gender_code)
+aggregated_data$gender_code = ifelse(aggregated_data$gender_code=="F","Female","Male")
+
+table(aggregated_data$gender_code)
+
+aggregated_data = aggregated_data %>% dplyr::rename(sex=gender_code)
+
+
+```
+
+
+
+```{r}
+merged_data = left_join(aggregated_data,standard_population,by=c("age_cats","sex"),relationship = "many-to-many")
+```
+
+
+#### Calculate standardized incidence rates
+
+##### Paediatrics
+
+###### Overall
+
+```{r}
+
+library(PHEindicatormethods)
+
+paeds2 = subset(merged_data,merged_data$Dataset=="Paediatics")
+
+# Calculate rates per Year directly standardized for age and sex
+incidence_rate_phe <- paeds2 %>%
+     group_by(Year) %>%
+     PHEindicatormethods::phe_dsr(
+          x = events,                 # column with observed number of events
+          n = pop,             # column with non-standard pops for each stratum
+          stdpop = stdpop,               # standard populations for each stratum
+          stdpoptype = "field",
+          multiplier = 100, 
+          confidence = 0.95)       # either "vector" for a standalone vector or "field" meaning std populations are in the data  
+
+
+incidence_rate_overall_paeds = incidence_rate_phe
+
+```
+
+
+###### By Age
+
+```{r}
+# Calculate rates per Year directly standardized for age and sex
+incidence_rate_phe <- paeds2 %>%
+     group_by(Year,age_cats) %>%
+     PHEindicatormethods::phe_dsr(
+          x = events,                 # column with observed number of events
+          n = pop,             # column with non-standard pops for each stratum
+          stdpop = stdpop,               # standard populations for each stratum
+          stdpoptype = "field",
+          multiplier = 100, 
+          confidence = 0.95)       # either "vector" for a standalone vector or "field" meaning std populations are in the data  
+
+
+incidence_rate_age_paeds = incidence_rate_phe
+```
+
+###### By Sex
+
+```{r}
+# Calculate rates per Year directly standardized for age and sex
+incidence_rate_phe <- paeds2 %>%
+     group_by(Year,sex) %>%
+     PHEindicatormethods::phe_dsr(
+          x = events,                 # column with observed number of events
+          n = pop,             # column with non-standard pops for each stratum
+          stdpop = stdpop,               # standard populations for each stratum
+          stdpoptype = "field",
+          multiplier = 100, 
+          confidence = 0.95)       # either "vector" for a standalone vector or "field" meaning std populations are in the data  
+
+incidence_rate_sex_paeds = incidence_rate_phe
+
+```
+
+
+####### Where events are below 10
+
+######## Overall
+
+```{r}
+library(dplyr)
+
+dsr_manual_paeds_overall <- paeds2 %>%
+  dplyr::group_by(Year) %>%
+  dplyr::summarise(
+    # stratum-specific rate
+    dsr_num = sum( (events / pop) * stdpop ),
+    W       = sum(stdpop),
+    dsr     = dsr_num / W,
+    # variance approximation for DSR
+    var_dsr = sum( (stdpop^2 * events) / (pop^2) ) / (W^2),
+    se_dsr  = sqrt(var_dsr),
+    # 95% normal-approx CI
+    lower   = dsr - 1.96 * se_dsr,
+    upper   = dsr + 1.96 * se_dsr,
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    rate_per_100k  = 100 * dsr,
+    lower_per_100k = 100 * pmax(lower, 0),
+    upper_per_100k = 100 * upper
+  )
+
+dsr_manual_paeds_overall
+
+
+```
+
+
+######## Age
+
+```{r}
+library(dplyr)
+
+dsr_manual_paeds_age <- paeds2 %>%
+  dplyr::group_by(Year,age_cats) %>%
+  dplyr::summarise(
+    # stratum-specific rate
+    dsr_num = sum( (events / pop) * stdpop ),
+    W       = sum(stdpop),
+    dsr     = dsr_num / W,
+    # variance approximation for DSR
+    var_dsr = sum( (stdpop^2 * events) / (pop^2) ) / (W^2),
+    se_dsr  = sqrt(var_dsr),
+    # 95% normal-approx CI
+    lower   = dsr - 1.96 * se_dsr,
+    upper   = dsr + 1.96 * se_dsr,
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    rate_per_100k  = 100 * dsr,
+    lower_per_100k = 100 * pmax(lower, 0),
+    upper_per_100k = 100 * upper
+  )
+
+dsr_manual_paeds_age
+
+
+```
+
+######## Sex
+
+```{r}
+library(dplyr)
+
+dsr_manual_paeds_sex <- paeds2 %>%
+  dplyr::group_by(Year,sex) %>%
+  dplyr::summarise(
+    # stratum-specific rate
+    dsr_num = sum( (events / pop) * stdpop ),
+    W       = sum(stdpop),
+    dsr     = dsr_num / W,
+    # variance approximation for DSR
+    var_dsr = sum( (stdpop^2 * events) / (pop^2) ) / (W^2),
+    se_dsr  = sqrt(var_dsr),
+    # 95% normal-approx CI
+    lower   = dsr - 1.96 * se_dsr,
+    upper   = dsr + 1.96 * se_dsr,
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    rate_per_100k  = 100 * dsr,
+    lower_per_100k = 100 * pmax(lower, 0),
+    upper_per_100k = 100 * upper
+  )
+
+dsr_manual_paeds_sex
+
+```
+
+
+###### Combine
+
+```{r}
+
+incidence_rate_overall_paeds=dsr_manual_paeds_overall
+incidence_rate_age_paeds=dsr_manual_paeds_age
+incidence_rate_sex_paeds=dsr_manual_paeds_sex
+
+incidence_rate_overall_paeds$Group = "Overall"
+incidence_rate_overall_paeds = incidence_rate_overall_paeds[,c(1,12,9:11)]
+
+incidence_rate_sex_paeds = incidence_rate_sex_paeds %>% dplyr::rename(Group=sex)
+incidence_rate_age_paeds = incidence_rate_age_paeds %>% dplyr::rename(Group=age_cats)
+
+incidence_rate_sex_paeds = incidence_rate_sex_paeds[,c(1,2,10:12)]
+incidence_rate_age_paeds = incidence_rate_age_paeds[,c(1,2,10:12)]
+
+
+paeds_combined = rbind(incidence_rate_overall_paeds,incidence_rate_sex_paeds,incidence_rate_age_paeds)
+
+
+names(paeds_combined)=c("Year","Group","value","lowercl","uppercl")
+  
+```
+
+
+```{r}
+paeds_combined = paeds_combined %>% dplyr::mutate(
+  
+  "Incidence per 100 (95% CI)" = ifelse(is.na(value), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     value, lowercl, uppercl))
+)
+
+paeds_combined0=paeds_combined
+
+```
+
+###### Incidence only no CIs
+
+```{r}
+paeds_combined = paeds_combined %>% dplyr::select(Group, Year, value)
+paeds_combined = paeds_combined %>% tidyr::spread(Year,value)
+paeds_combined$Population = "Paediatrics"
+paeds_combined1=paeds_combined
+```
+
+###### Incidence with CIs
+
+```{r}
+paeds_combined = paeds_combined0 %>% dplyr::select(Group, Year, "Incidence per 100 (95% CI)")
+paeds_combined = paeds_combined %>% tidyr::spread(Year,"Incidence per 100 (95% CI)")
+paeds_combined$Population = "Paediatrics"
+
+```
+
+
+
+##### Adults
+
+###### Overall
+
+```{r}
+
+library(PHEindicatormethods)
+
+adults2 = subset(merged_data,merged_data$Dataset=="Adult")
+
+# Calculate rates per Year directly standardized for age and sex
+incidence_rate_phe <- adults2 %>%
+     group_by(Year) %>%
+     PHEindicatormethods::phe_dsr(
+          x = events,                 # column with observed number of events
+          n = pop,             # column with non-standard pops for each stratum
+          stdpop = stdpop,               # standard populations for each stratum
+          stdpoptype = "field",
+          multiplier = 100, 
+          confidence = 0.95)       # either "vector" for a standalone vector or "field" meaning std populations are in the data  
+
+
+incidence_rate_overall_adult = incidence_rate_phe
+
+```
+
+
+###### By age
+
+```{r}
+
+library(PHEindicatormethods)
+
+adults2 = subset(merged_data,merged_data$Dataset=="Adult")
+
+# Calculate rates per Year directly standardized for age and sex
+incidence_rate_phe <- adults2 %>%
+     group_by(Year,age_cats) %>%
+     PHEindicatormethods::phe_dsr(
+          x = events,                 # column with observed number of events
+          n = pop,             # column with non-standard pops for each stratum
+          stdpop = stdpop,               # standard populations for each stratum
+          stdpoptype = "field",
+          multiplier = 100, 
+          confidence = 0.95)       # either "vector" for a standalone vector or "field" meaning std populations are in the data  
+
+
+incidence_rate_age_adult = incidence_rate_phe
+
+```
+
+
+
+###### By Sex
+
+```{r}
+
+library(PHEindicatormethods)
+
+adults2 = subset(merged_data,merged_data$Dataset=="Adult")
+
+# Calculate rates per Year directly standardized for age and sex
+incidence_rate_phe <- adults2 %>%
+     group_by(Year,sex) %>%
+     PHEindicatormethods::phe_dsr(
+          x = events,                 # column with observed number of events
+          n = pop,             # column with non-standard pops for each stratum
+          stdpop = stdpop,               # standard populations for each stratum
+          stdpoptype = "field",
+          multiplier = 100, 
+          confidence = 0.95)       # either "vector" for a standalone vector or "field" meaning std populations are in the data  
+
+
+incidence_rate_sex_adult = incidence_rate_phe
+
+```
+
+
+###### Combine
+
+```{r}
+
+incidence_rate_overall_adult$Group = "Overall"
+incidence_rate_overall_adult = incidence_rate_overall_adult[,c(1,10,2:9)]
+
+incidence_rate_sex_adult = incidence_rate_sex_adult %>% dplyr::rename(Group=sex)
+incidence_rate_age_adult = incidence_rate_age_adult %>% dplyr::rename(Group=age_cats)
+
+adult_combined = rbind(incidence_rate_overall_adult,incidence_rate_sex_adult,incidence_rate_age_adult)
+  
+  
+```
+
+
+```{r}
+adult_combined0 = adult_combined %>% dplyr::mutate(
+  
+  "Incidence per 100 (95% CI)" = ifelse(is.na(value), "",
+                             sprintf("%.4f (%.4f to %.4f)",
+                                     value, lowercl, uppercl))
+)
+```
+
+###### Incidence only no CIs
+
+```{r}
+adult_combined = adult_combined0 %>% dplyr::select(Group, Year, value)
+adult_combined = adult_combined %>% tidyr::spread(Year,value)
+adult_combined$Population = "Adults"
+
+```
+
+
+```{r}
+std_incidence_UK = rbind(paeds_combined1,adult_combined)
+write.csv(std_incidence_UK,"Standardized_Incidence_NoCIs_UK.csv")
+
+```
+
+
+###### Incidence with CIs
+
+```{r}
+adult_combined = adult_combined0 %>% dplyr::select(Group, Year, "Incidence per 100 (95% CI)")
+adult_combined = adult_combined %>% tidyr::spread(Year,"Incidence per 100 (95% CI)")
+adult_combined$Population = "Adults"
+
+```
+
+
+```{r}
+std_incidence_UK = rbind(paeds_combined,adult_combined)
+write.csv(std_incidence_UK,"Standardized_Incidence_WithCIs_UK.csv")
+
+```
+
+
+
+
+
+```{r}
+crude_inc = read.csv("Crude_Incidence_NoCIs_UK.csv")
+crude_inc$Metric = "Crude"
+standardized_inc = read.csv("Standardized_Incidence_NoCIs_UK.csv")
+standardized_inc$Metric = "Standardized"
+
+
+crude_and_standardized = rbind(crude_inc,standardized_inc)
+
+
+crude_and_standardized = crude_and_standardized[,c(6,2,7,3:5)]
+
+
+crude_and_standardized <- crude_and_standardized %>%
+  arrange(Population, Group, Metric)
+
+
+write.csv(crude_and_standardized,"Crude_and_Standardized.csv",row.names = F)
+
+```
+
+
+
+### Merge Standardized and Crude
+
+
+```{r}
+
+adult_combined0$Population = "Adults"
+paeds_combined0$Population = "Paediatric"
+combined2 = rbind(adult_combined0,paeds_combined0)[,c(1,2,5:7,11,12)]
+combined2 = combined2 %>% dplyr::rename(Standardized_Inc=value,Standardized_LL=lowercl,Standardized_UL=uppercl)
+combined2 = combined2 %>% dplyr::rename("Standardized Incidence per 100 (95% CI)"="Incidence per 100 (95% CI)")
+
+
+combined = combined %>% dplyr::rename(Crude_Inc=Incidence,Crude_LL=LL,Crude_UL=UL)
+combined = combined %>% dplyr::rename("Crude Incidence per 100 (95% CI)"="Incidence per 100 (95% CI)")
+
+
+final_clean = left_join(combined,combined2,by=c("Population","Group","Year"))
+write.csv(final_clean,"All_results_UK.csv",row.names = F)
+
+
+```
+
